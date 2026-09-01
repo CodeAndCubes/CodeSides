@@ -13,3 +13,4 @@ bin/
 openspec/
 *.md
 !README.md
+!perms.md

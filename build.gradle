@@ -1,0 +1,64 @@
+plugins {
+	id 'java-library'
+	id 'java-gradle-plugin'
+	id 'maven-publish'
+}
+
+group = 'com.mrleonardos'
+version = '1.0.0'
+
+repositories {
+	mavenCentral()
+}
+
+java {
+	toolchain {
+		languageVersion = JavaLanguageVersion.of(21)
+	}
+	withSourcesJar()
+	withJavadocJar()
+}
+
+tasks.withType(JavaCompile).configureEach {
+	options.encoding = 'UTF-8'
+	options.release = 8
+}
+
+tasks.withType(Javadoc).configureEach {
+	options.encoding = 'UTF-8'
+	options.addStringOption('Xdoclint:none', '-quiet')
+}
+
+dependencies {
+	api 'org.ow2.asm:asm:9.7'
+	api 'org.ow2.asm:asm-tree:9.7'
+
+	testImplementation platform('org.junit:junit-bom:5.10.2')
+	testImplementation 'org.junit.jupiter:junit-jupiter'
+	testImplementation gradleTestKit()
+	testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+gradlePlugin {
+	plugins {
+		codeSides {
+			id = 'com.mrleonardos.codesides'
+			implementationClass = 'com.mrleonardos.codesides.gradle.CodeSidesPlugin'
+			displayName = 'CodeSides'
+			description = 'Build-time разделение мода на клиент и сервер: физическое вырезание кода чужой стороны + верификация ссылок.'
+		}
+	}
+}
+
+test {
+	useJUnitPlatform()
+	testLogging {
+		events 'passed', 'failed', 'skipped'
+	}
+}
+
+publishing {
+	repositories {
+		mavenLocal()
+	}
+}

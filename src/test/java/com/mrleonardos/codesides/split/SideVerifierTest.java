@@ -67,6 +67,30 @@ class SideVerifierTest
 	}
 
 	@Test
+	void classpathContractIsCheckedOnlyWhenInputIsNotReobfuscated()
+	{
+		SplitOutput client = SideSplitter.split(Fixtures.subset("ContractImpl"), Side.CLIENT);
+		Map<String, byte[]> classpath = Fixtures.subset("Contract");
+		ClassLookup lookup = classpath::get;
+
+		assertTrue(SideVerifier.verify(client, lookup, false).stream().anyMatch(v -> v.from.equals(PKG + "ContractImpl")
+			&& Violation.KIND_ABSTRACT.equals(v.kind) && v.target.contains("contractName")),
+			"без реобфускации имена мода и classpath совпадают, контракт внешнего типа проверяется");
+		assertTrue(SideVerifier.verify(client, lookup, true).isEmpty(),
+			"в реобфусцированном jar метод мода уже переименован, а classpath отдаёт MCP: сравнивать имена нельзя");
+	}
+
+	@Test
+	void platformContractIsCheckedEvenOnReobfuscatedInput()
+	{
+		SplitOutput client = SideSplitter.split(Fixtures.subset("BridgeCase"), Side.CLIENT);
+
+		assertTrue(SideVerifier.verify(client, ClassLookup.EMPTY, true).stream()
+			.anyMatch(v -> v.from.equals(PKG + "BridgeCase") && Violation.KIND_ABSTRACT.equals(v.kind)),
+			"реобфускация не переименовывает методы, которые реализуют типы платформы");
+	}
+
+	@Test
 	void inlinedConstantOfRemovedClassIsReported()
 	{
 		Map<String, byte[]> input = Fixtures.subset("ServerConstants", "ConstantUser");
@@ -79,6 +103,27 @@ class SideVerifierTest
 			"codesides-db-password-secret"), "строка действительно лежит в байткоде: ровно поэтому сборка и падает");
 		assertFalse(violations.stream().anyMatch(v -> v.target.contains("INTERNAL_TAG")),
 			"private-константу вырезанного класса подставить некуда, совпадение текста нарушением не считается");
+	}
+
+	@Test
+	void numericConstantWithTheSameValueElsewhereIsNotReported()
+	{
+		List<Violation> violations = verifyClient(Fixtures.subset("ServerNumbers", "NumberLookalike"));
+
+		assertTrue(violations.isEmpty(), "после инлайна число 256 из вырезанной константы неотличимо от любого "
+			+ "другого числа 256, поэтому числовые константы не проверяются вовсе: " + violations);
+	}
+
+	@Test
+	void constantValueInsideShadedLibraryIsNotReported()
+	{
+		List<Violation> violations = verifyClient(Fixtures.withExternal(
+			Fixtures.subset("ServerConstants", "ConstantUser"), "shaded/imaging/ShadedLibrary"));
+
+		assertTrue(violations.stream().anyMatch(v -> v.from.equals(PKG + "ConstantUser")
+			&& Violation.KIND_INLINED.equals(v.kind)), "класс мода с этой строкой это по-прежнему утечка");
+		assertFalse(violations.stream().anyMatch(v -> v.from.startsWith("shaded/")),
+			"шейдженная библиотека собрана не против нашей константы: совпадение текста в ней нарушением не считается");
 	}
 
 	@Test

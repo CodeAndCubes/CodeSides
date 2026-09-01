@@ -43,6 +43,8 @@ import org.objectweb.asm.tree.TypeInsnNode;
  *
  * <p>Отдельно ловятся константы времени компиляции: значение {@code static final} поля javac подставляет по
  * месту использования, поэтому вырезание такого поля само по себе значение из чужого jar не убирает.
+ * Проверяются только строковые константы: после подстановки число из вырезанной константы неотличимо от
+ * такого же числа в чужом классе, а совпадение длинной строки случайным не бывает.
  */
 public final class SideVerifier
 {
@@ -64,6 +66,23 @@ public final class SideVerifier
 	 */
 	public static List<Violation> verify(SplitOutput out, ClassLookup lookup)
 	{
+		return verify(out, lookup, false);
+	}
+
+	/**
+	 * То же самое, с оговоркой про реобфусцированный вход.
+	 *
+	 * <p>В реобфусцированном jar методы мода, которые перекрывают методы Minecraft, уже переименованы в notch,
+	 * а compile classpath отдаёт те же типы с именами MCP. Сравнивать такие имена нельзя, поэтому контракты
+	 * внешних типов из {@code lookup} в этом режиме не проверяются. Контракты типов из самого архива и типов
+	 * платформы ({@link PlatformLookup}) реобфускация не трогает, они проверяются как обычно.
+	 *
+	 * @param out          результат разреза одной стороны
+	 * @param lookup       байткод внешних типов (Minecraft, Forge, библиотеки) или {@link ClassLookup#EMPTY}
+	 * @param reobfuscated вход уже прошёл реобфускацию, имена его методов не совпадают с classpath
+	 */
+	public static List<Violation> verify(SplitOutput out, ClassLookup lookup, boolean reobfuscated)
+	{
 		List<Violation> violations = new ArrayList<>();
 		Map<String, ClassNode> live = new LinkedHashMap<>();
 		for (Map.Entry<String, byte[]> e : out.classes.entrySet())
@@ -74,7 +93,7 @@ public final class SideVerifier
 
 		checkConstants(live, out, violations);
 
-		Resolver resolver = new Resolver(live, lookup);
+		Resolver resolver = new Resolver(live, reobfuscated ? ClassLookup.EMPTY : lookup);
 		for (ClassNode cn : live.values())
 			checkAbstractContract(cn, resolver, violations);
 
@@ -242,31 +261,35 @@ public final class SideVerifier
 
 	private static void checkConstants(Map<String, ClassNode> live, SplitOutput out, List<Violation> violations)
 	{
-		if (out.removedConstants.isEmpty())
-			return;
+		Map<MemberRef, String> removed = new LinkedHashMap<>();
 		for (Map.Entry<MemberRef, Object> constant : out.removedConstants.entrySet())
-			if (out.removedFields.contains(constant.getKey()))
-				violations.add(new Violation(constant.getKey().owner, "поле " + constant.getKey().name,
-					constant.getKey().toString(), Violation.KIND_CONSTANT));
+			if (constant.getValue() instanceof String)
+				removed.put(constant.getKey(), (String) constant.getValue());
+		if (removed.isEmpty())
+			return;
 
-		Set<Object> wanted = new HashSet<>(out.removedConstants.values());
+		for (MemberRef ref : removed.keySet())
+			if (out.removedFields.contains(ref))
+				violations.add(new Violation(ref.owner, "поле " + ref.name, ref.toString(), Violation.KIND_CONSTANT));
+
+		Set<String> wanted = new HashSet<>(removed.values());
 		for (ClassNode cn : live.values())
 		{
-			Set<Object> present = constantsOf(cn, wanted);
+			Set<String> present = constantsOf(cn, wanted);
 			if (present.isEmpty())
 				continue;
-			for (Map.Entry<MemberRef, Object> constant : out.removedConstants.entrySet())
-				if (present.contains(constant.getValue()))
+			for (Map.Entry<MemberRef, String> constant : removed.entrySet())
+				if (present.contains(constant.getValue()) && sameRoot(constant.getKey().owner, cn.name))
 					violations.add(new Violation(cn.name, null, constant.getKey().toString(), Violation.KIND_INLINED));
 		}
 	}
 
-	private static Set<Object> constantsOf(ClassNode cn, Set<Object> wanted)
+	private static Set<String> constantsOf(ClassNode cn, Set<String> wanted)
 	{
-		Set<Object> present = new HashSet<>();
+		Set<String> present = new HashSet<>();
 		for (FieldNode fn : cn.fields)
-			if (fn.value != null && wanted.contains(fn.value))
-				present.add(fn.value);
+			if (fn.value instanceof String && wanted.contains(fn.value))
+				present.add((String) fn.value);
 		for (MethodNode mn : cn.methods)
 		{
 			if (mn.instructions == null)
@@ -276,11 +299,26 @@ public final class SideVerifier
 				if (!(insn instanceof LdcInsnNode))
 					continue;
 				Object cst = ((LdcInsnNode) insn).cst;
-				if (wanted.contains(cst))
-					present.add(cst);
+				if (cst instanceof String && wanted.contains(cst))
+					present.add((String) cst);
 			}
 		}
 		return present;
+	}
+
+	private static boolean sameRoot(String owner, String candidate)
+	{
+		String root = packageRoot(owner);
+		return root.isEmpty() || candidate.startsWith(root + "/");
+	}
+
+	private static String packageRoot(String internalName)
+	{
+		int first = internalName.indexOf('/');
+		if (first < 0)
+			return "";
+		int second = internalName.indexOf('/', first + 1);
+		return second < 0 ? internalName.substring(0, first) : internalName.substring(0, second);
 	}
 
 	private static void checkClass(String internalName, String from, String where, SplitOutput out,

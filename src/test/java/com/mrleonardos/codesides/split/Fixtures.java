@@ -62,6 +62,22 @@ final class Fixtures
 		return classes;
 	}
 
+	static Map<String, byte[]> withExternal(Map<String, byte[]> classes, String... internalNames)
+	{
+		Path root = classpathRoot();
+		Map<String, byte[]> result = new LinkedHashMap<>(classes);
+		try
+		{
+			for (String name : internalNames)
+				result.put(name, Files.readAllBytes(root.resolve(name + ".class")));
+		}
+		catch (IOException e)
+		{
+			throw new UncheckedIOException(e);
+		}
+		return result;
+	}
+
 	static boolean containsText(Map<String, byte[]> classes, String text)
 	{
 		for (byte[] bytes : classes.values())

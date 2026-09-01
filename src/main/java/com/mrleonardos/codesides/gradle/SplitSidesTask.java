@@ -105,14 +105,21 @@ public abstract class SplitSidesTask extends DefaultTask
 			getDefaultResourceRules().get());
 
 		List<Cut> cuts = new ArrayList<>();
+		boolean reobfuscated = getInputJar().isPresent();
 		ClasspathLookup lookup = getVerifyClasspath().isEmpty() ? null
 			: new ClasspathLookup(getVerifyClasspath().getFiles());
+		if (reobfuscated && lookup != null)
+			getLogger().lifecycle("CodeSides: вход реобфусцирован (inputJar), поэтому контракты внешних типов по "
+				+ "compile classpath пропущены: в jar имена методов уже notch, а classpath отдаёт MCP. Контракты "
+				+ "типов самого мода и типов платформы проверяются как обычно");
 		try
 		{
 			if (getServer().get())
-				cuts.add(cut(source, Side.SERVER, serverTarget, rules, lookup == null ? ClassLookup.EMPTY : lookup));
+				cuts.add(cut(source, Side.SERVER, serverTarget, rules, lookup == null ? ClassLookup.EMPTY : lookup,
+					reobfuscated));
 			if (getClient().get())
-				cuts.add(cut(source, Side.CLIENT, clientTarget, rules, lookup == null ? ClassLookup.EMPTY : lookup));
+				cuts.add(cut(source, Side.CLIENT, clientTarget, rules, lookup == null ? ClassLookup.EMPTY : lookup,
+					reobfuscated));
 		}
 		finally
 		{
@@ -134,13 +141,14 @@ public abstract class SplitSidesTask extends DefaultTask
 		return source;
 	}
 
-	private Cut cut(ModArchive source, Side side, File target, ResourceRules rules, ClassLookup lookup)
+	private Cut cut(ModArchive source, Side side, File target, ResourceRules rules, ClassLookup lookup,
+		boolean reobfuscated)
 	{
 		if (target == null)
 			throw new GradleException("CodeSides: для стороны " + side + " не задан выходной архив");
 
 		SplitOutput out = SideSplitter.split(source.classes, side);
-		List<Violation> violations = SideVerifier.verify(out, lookup);
+		List<Violation> violations = SideVerifier.verify(out, lookup, reobfuscated);
 		if (!violations.isEmpty())
 			report(side, violations);
 
@@ -185,9 +193,9 @@ public abstract class SplitSidesTask extends DefaultTask
 		message.append("Оставшийся код зависит от вырезанного. Спрячь логику стороны за общим интерфейсом, "
 			+ "а реализацию пометь @ServerSide/@ClientSide — либо пометь и сам класс-ссылку.");
 		if (contains(violations, Violation.KIND_CONSTANT, Violation.KIND_INLINED))
-			message.append('\n').append("Константы времени компиляции (static final примитив или String) javac "
-				+ "подставляет по месту использования: пометка стороной значение не убирает. Отдавай его из "
-				+ "помеченного метода или держи в помеченном классе, к которому общий код не обращается.");
+			message.append('\n').append("Значение static final поля javac подставляет по месту использования: "
+				+ "пометка стороной его не убирает. Отдавай его из помеченного метода или держи в помеченном "
+				+ "классе, к которому общий код не обращается.");
 		if (contains(violations, Violation.KIND_INITIALIZER))
 			message.append('\n').append("Помеченное поле с инициализатором вырезается только наполовину: "
 				+ "присваивание остаётся в <init>/<clinit> вместе с телом лямбды или анонимки. Перенеси "

@@ -8,18 +8,20 @@ on:
 
 jobs:
   build:
-    name: Сборка на JDK 21
+    name: Сборка на JDK 25
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: 21
+          java-version: |
+            21
+            25
       - uses: gradle/actions/setup-gradle@v4
       - run: chmod +x gradlew
-      - name: Форматирование и сборка
-        run: ./gradlew build --stacktrace
+      - name: Сборка
+        run: ./gradlew build -Dorg.gradle.java.installations.fromEnv=JAVA_HOME_21_X64,JAVA_HOME_25_X64 --stacktrace
       - name: Байткод обязан быть восьмым
         run: python3 .github/check-bytecode.py build/libs
       - uses: actions/upload-artifact@v4
@@ -44,10 +46,11 @@ jobs:
           java-version: |
             ${{ matrix.java }}
             21
+            25
       - uses: gradle/actions/setup-gradle@v4
       - run: chmod +x gradlew
       - name: Тесты
         run: >-
           ./gradlew test -PtestJdk=${{ matrix.java }}
-          -Dorg.gradle.java.installations.fromEnv=JAVA_HOME_${{ matrix.java }}_X64
+          -Dorg.gradle.java.installations.fromEnv=JAVA_HOME_${{ matrix.java }}_X64,JAVA_HOME_21_X64,JAVA_HOME_25_X64
           --stacktrace

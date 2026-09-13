@@ -1,0 +1,37 @@
+# Тег вида v1.0.0 создаёт релиз и прикладывает к нему плагин.
+
+name: Выпуск
+
+on:
+  push:
+    tags: [ 'v*' ]
+  workflow_dispatch:
+
+jobs:
+  release:
+    name: Собрать и выложить
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: |
+            21
+            25
+      - uses: gradle/actions/setup-gradle@v4
+      - run: chmod +x gradlew
+      - name: Сборка
+        run: ./gradlew build -Dorg.gradle.java.installations.fromEnv=JAVA_HOME_21_X64,JAVA_HOME_25_X64 --stacktrace
+      - name: Байткод обязан читаться на Java 8
+        run: python3 .github/check-bytecode.py build/libs
+      - name: Выложить
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" build/libs/*.jar \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "${GITHUB_REF_NAME}" \
+            --notes-file .github/release-notes.md

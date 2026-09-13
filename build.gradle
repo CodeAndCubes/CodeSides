@@ -52,6 +52,14 @@ gradlePlugin {
 
 test {
 	useJUnitPlatform()
+
+    // Прогон тестов на другой Java: `./gradlew test -PtestJdk=8`. Байткод у мода всегда восьмой, а вот
+    // ведёт себя он на разных версиях по-разному: серверы 1.7.10 живут и на 8, и на 21 под lwjgl3ify.
+    if (project.hasProperty('testJdk')) {
+        javaLauncher = javaToolchains.launcherFor {
+            languageVersion = JavaLanguageVersion.of(project.property('testJdk') as int)
+        }
+    }
 	testLogging {
 		events 'passed', 'failed', 'skipped'
 	}

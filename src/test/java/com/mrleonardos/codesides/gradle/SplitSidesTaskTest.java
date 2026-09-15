@@ -9,6 +9,8 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipInputStream;
 
 import org.gradle.testkit.runner.BuildResult;
 import org.gradle.testkit.runner.GradleRunner;
@@ -70,6 +72,31 @@ class SplitSidesTaskTest
 
 		assertTrue(archive("server").isFile(), "включённая сторона пишется как обычно");
 		assertFalse(archive("client").isFile(), "прошлый клиентский jar не должен пережить client = false");
+	}
+
+	@Test
+	void inputJarModeCutsTheReadyArchive() throws IOException
+	{
+		writeProject("codeSides {\n\tinputJar = tasks.named('jar').flatMap { it.archiveFile }\n}\n");
+		write("src/main/java/mymod/Common.java", CLEAN_COMMON);
+
+		assertEquals(TaskOutcome.SUCCESS, run().task(":splitSides").getOutcome());
+		assertTrue(archive("server").isFile(), "в режиме inputJar стороны пишутся как обычно");
+		assertTrue(jarEntry(archive("server"), "mymod/ServerThing.class"),
+			"серверная сторона режется из готового jar, своя половина остаётся");
+		assertFalse(jarEntry(archive("client"), "mymod/ServerThing.class"),
+			"клиентская сторона режется из готового jar, чужая половина уходит");
+	}
+
+	private boolean jarEntry(File jar, String entry) throws IOException
+	{
+		try (ZipInputStream zip = new ZipInputStream(Files.newInputStream(jar.toPath())))
+		{
+			for (ZipEntry e = zip.getNextEntry(); e != null; e = zip.getNextEntry())
+				if (e.getName().equals(entry))
+					return true;
+			return false;
+		}
 	}
 
 	private BuildResult run()

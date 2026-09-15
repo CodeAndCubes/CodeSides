@@ -24,6 +24,8 @@ class SideSplitterTest
 	private static final String BOXED = PKG + "Boxed";
 	private static final String FLAVOURS = PKG + "Flavours";
 	private static final String SERIAL_LAMBDA = PKG + "SerialLambda";
+	private static final String SERIAL_SECRET = PKG + "SerialSecret";
+	private static final String SIGNATURE_LOCALS = PKG + "SignatureLocals";
 
 	@Test
 	void clientSideDropsServerClassesMembersAndPackages()
@@ -103,6 +105,55 @@ class SideSplitterTest
 			assertTrue(hasMethod(holder, "$deserializeLambda$", desc),
 				"JVM зовёт $deserializeLambda$ по имени, ссылок в байткоде нет: сметать его нельзя, сторона " + side);
 		}
+	}
+
+	@Test
+	void serializableLambdaBodyOfRemovedMethodIsCut()
+	{
+		Map<String, byte[]> input = Fixtures.subset("SerialSecret");
+		SplitOutput client = SideSplitter.split(input, Side.CLIENT);
+
+		assertFalse(Fixtures.containsText(client.classes, "codesides-ser-lambda-secret"),
+			"тело serializable-лямбды вырезанного метода не должно уезжать в клиентский jar: единственная "
+				+ "ссылка на него живёт в $deserializeLambda$ и корнем быть не может");
+		assertFalse(Fixtures.containsText(client.classes, "codesides-plain-lambda-secret"),
+			"обычная лямбда вырезанного метода уходит как раньше");
+		assertTrue(Fixtures.containsText(client.classes, "codesides-serial-common"),
+			"serializable-лямбда общего метода остаётся");
+		assertTrue(client.classes.containsKey(SERIAL_SECRET), "сам класс общий и остаётся");
+		assertTrue(client.removedMethods.stream().anyMatch(m -> m.owner.equals(SERIAL_SECRET)
+			&& m.name.startsWith("lambda$serverSerializable$")),
+			"тело с хэш-сегментом в имени (lambda$serverSerializable$<хэш>$<номер>) вырезано как метод");
+		assertTrue(SideVerifier.verify(client, ClassLookup.EMPTY).isEmpty(),
+			"мёртвая ссылка из $deserializeLambda$ на вырезанное тело лямбды нарушением не считается");
+	}
+
+	@Test
+	void namedMemberOfRemovedAnonymousClassIsCascaded()
+	{
+		Map<String, byte[]> input = Fixtures.subset("NamedInsideAnonymous", "Api");
+		SplitOutput client = SideSplitter.split(input, Side.CLIENT);
+
+		assertTrue(client.removedClasses.contains(PKG + "NamedInsideAnonymous$1"),
+			"анонимный класс вырезанного метода уходит");
+		assertTrue(client.removedClasses.contains(PKG + "NamedInsideAnonymous$1$Helper"),
+			"именованный класс-член вырезаемой анонимки уходит по записи InnerClasses: EnclosingMethod у него нет");
+		assertFalse(Fixtures.containsText(client.classes, "codesides-named-inside-secret"));
+		assertTrue(SideVerifier.verify(client, ClassLookup.EMPTY).isEmpty(),
+			"каскад отрабатывает до sweep, нарушения про synthetic-поле this$0 не остаётся");
+	}
+
+	@Test
+	void localVariableGenericSignatureLosesRemovedClassName()
+	{
+		Map<String, byte[]> input = Fixtures.subset("SignatureLocals");
+		SplitOutput client = SideSplitter.split(input, Side.CLIENT);
+
+		assertTrue(client.removedClasses.contains(SIGNATURE_LOCALS + "$Hidden"), "пометка на вложенном классе режет его");
+		assertFalse(Fixtures.containsText(client.classes, "Hidden"),
+			"строки SignatureLocals$Hidden не должно остаться: generic-сигнатура локальной переменной "
+				+ "не хранит имя вырезанного класса");
+		assertTrue(SideVerifier.verify(client, ClassLookup.EMPTY).isEmpty());
 	}
 
 	@Test

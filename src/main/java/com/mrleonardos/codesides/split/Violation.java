@@ -24,13 +24,21 @@ public final class Violation
 	public final String fromMember;
 	public final String target;
 	public final String kind;
+	/** Строка исходника из LineNumberTable, ноль если место без номера (класс, поле, заголовок метода). */
+	public final int line;
 
 	public Violation(String from, String fromMember, String target, String kind)
+	{
+		this(from, fromMember, target, kind, 0);
+	}
+
+	public Violation(String from, String fromMember, String target, String kind, int line)
 	{
 		this.from = from;
 		this.fromMember = fromMember;
 		this.target = target;
 		this.kind = kind;
+		this.line = line;
 	}
 
 	@Override
@@ -41,21 +49,21 @@ public final class Violation
 		if (!(o instanceof Violation))
 			return false;
 		Violation other = (Violation) o;
-		return from.equals(other.from) && target.equals(other.target) && kind.equals(other.kind)
+		return from.equals(other.from) && target.equals(other.target) && kind.equals(other.kind) && line == other.line
 			&& (fromMember == null ? other.fromMember == null : fromMember.equals(other.fromMember));
 	}
 
 	@Override
 	public int hashCode()
 	{
-		return ((from.hashCode() * 31 + (fromMember == null ? 0 : fromMember.hashCode())) * 31 + target.hashCode())
-			* 31 + kind.hashCode();
+		return (((from.hashCode() * 31 + (fromMember == null ? 0 : fromMember.hashCode())) * 31 + target.hashCode())
+			* 31 + kind.hashCode()) * 31 + line;
 	}
 
 	@Override
 	public String toString()
 	{
-		String where = from.replace('/', '.') + (fromMember != null ? " (" + fromMember + ")" : "");
+		String where = from.replace('/', '.') + (fromMember != null ? " (" + fromMember + place() + ")" : "");
 		if (KIND_ABSTRACT.equals(kind))
 			return where + " -> нет реализации абстрактного метода " + target;
 		if (KIND_SIGNATURE.equals(kind))
@@ -68,5 +76,10 @@ public final class Violation
 		if (KIND_INITIALIZER.equals(kind))
 			return where + " -> вырезанное поле " + target.replace('/', '.') + " присваивается в инициализаторе";
 		return where + " -> вырезанный " + kind + " " + target.replace('/', '.');
+	}
+
+	private String place()
+	{
+		return line > 0 ? ", строка " + line : "";
 	}
 }

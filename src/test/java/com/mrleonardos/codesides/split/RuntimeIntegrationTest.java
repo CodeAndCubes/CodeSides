@@ -52,16 +52,26 @@ class RuntimeIntegrationTest
 	{
 		Map<String, byte[]> input = Fixtures.subset("SerialLambda");
 
-		assertEquals("serial-lambda", deserializeIn(SideSplitter.split(input, Side.CLIENT).classes),
+		assertEquals("serial-lambda", deserializeIn(SideSplitter.split(input, Side.CLIENT).classes, "SerialLambda", "make"),
 			"десериализация лямбды идёт через $deserializeLambda$, и разрез не должен её ломать");
-		assertEquals("serial-lambda", deserializeIn(SideSplitter.split(input, Side.SERVER).classes));
+		assertEquals("serial-lambda", deserializeIn(SideSplitter.split(input, Side.SERVER).classes, "SerialLambda", "make"));
 	}
 
-	private static String deserializeIn(Map<String, byte[]> classes) throws Exception
+	@Test
+	void keptSerializableLambdaDeserializesAfterItsNeighbourIsCut() throws Exception
+	{
+		Map<String, byte[]> input = Fixtures.subset("SerialSecret");
+
+		assertEquals("codesides-serial-common",
+			deserializeIn(SideSplitter.split(input, Side.CLIENT).classes, "SerialSecret", "commonSerial"),
+			"вырезание тела соседней лямбды не должно ломать $deserializeLambda$ общего метода");
+	}
+
+	private static String deserializeIn(Map<String, byte[]> classes, String holderName, String method) throws Exception
 	{
 		ByteClassLoader loader = new ByteClassLoader(classes);
-		Class<?> holder = loader.loadClass(PKG.replace('/', '.') + "SerialLambda");
-		Object lambda = holder.getMethod("make").invoke(holder.getDeclaredConstructor().newInstance());
+		Class<?> holder = loader.loadClass(PKG.replace('/', '.') + holderName);
+		Object lambda = holder.getMethod(method).invoke(holder.getDeclaredConstructor().newInstance());
 
 		ByteArrayOutputStream bytes = new ByteArrayOutputStream();
 		try (ObjectOutputStream out = new ObjectOutputStream(bytes))

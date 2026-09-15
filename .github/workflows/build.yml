@@ -30,6 +30,7 @@ jobs:
           path: |
             build/libs/*.jar
             !build/libs/*-sources.jar
+            !build/libs/*-javadoc.jar
 
   tests:
     name: Тесты на JDK ${{ matrix.java }}

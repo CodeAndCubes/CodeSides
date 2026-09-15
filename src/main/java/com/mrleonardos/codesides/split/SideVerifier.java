@@ -22,6 +22,8 @@ import org.objectweb.asm.tree.FieldInsnNode;
 import org.objectweb.asm.tree.FieldNode;
 import org.objectweb.asm.tree.InvokeDynamicInsnNode;
 import org.objectweb.asm.tree.LdcInsnNode;
+import org.objectweb.asm.tree.LineNumberNode;
+import org.objectweb.asm.tree.LocalVariableNode;
 import org.objectweb.asm.tree.MethodInsnNode;
 import org.objectweb.asm.tree.MethodNode;
 import org.objectweb.asm.tree.MultiANewArrayInsnNode;
@@ -45,6 +47,10 @@ import org.objectweb.asm.tree.TypeInsnNode;
  * месту использования, поэтому вырезание такого поля само по себе значение из чужого jar не убирает.
  * Проверяются только строковые константы: после подстановки число из вырезанной константы неотличимо от
  * такого же числа в чужом классе, а совпадение длинной строки случайным не бывает.
+ *
+ * <p>Нарушения ссылаются на строку исходника из {@code LineNumberTable}, когда место в байткоде её имеет:
+ * инструкция берёт ближайший предшествующий номер строки, заголовок метода и его таблица локальных
+ * переменных берут первую строку метода. Класс и поле номеров строки не имеют вовсе.
  */
 public final class SideVerifier
 {
@@ -102,117 +108,136 @@ public final class SideVerifier
 
 	private static void checkReferences(ClassNode cn, SplitOutput out, List<Violation> violations)
 	{
-		checkClass(cn.superName, cn.name, null, out, violations);
+		checkClass(cn.superName, cn.name, null, 0, out, violations);
 		if (cn.interfaces != null)
 			for (String itf : cn.interfaces)
-				checkClass(itf, cn.name, null, out, violations);
-		checkSignature(cn.signature, cn.name, null, out, violations);
-		checkAnnotations(cn.visibleAnnotations, cn.name, null, out, violations);
-		checkAnnotations(cn.invisibleAnnotations, cn.name, null, out, violations);
-		checkAnnotations(cn.visibleTypeAnnotations, cn.name, null, out, violations);
-		checkAnnotations(cn.invisibleTypeAnnotations, cn.name, null, out, violations);
+				checkClass(itf, cn.name, null, 0, out, violations);
+		checkSignature(cn.signature, cn.name, null, 0, out, violations);
+		checkAnnotations(cn.visibleAnnotations, cn.name, null, 0, out, violations);
+		checkAnnotations(cn.invisibleAnnotations, cn.name, null, 0, out, violations);
+		checkAnnotations(cn.visibleTypeAnnotations, cn.name, null, 0, out, violations);
+		checkAnnotations(cn.invisibleTypeAnnotations, cn.name, null, 0, out, violations);
 
 		for (FieldNode fn : cn.fields)
 		{
 			String where = "поле " + fn.name;
-			checkDesc(fn.desc, cn.name, where, out, violations);
-			checkSignature(fn.signature, cn.name, where, out, violations);
-			checkAnnotations(fn.visibleAnnotations, cn.name, where, out, violations);
-			checkAnnotations(fn.invisibleAnnotations, cn.name, where, out, violations);
-			checkAnnotations(fn.visibleTypeAnnotations, cn.name, where, out, violations);
-			checkAnnotations(fn.invisibleTypeAnnotations, cn.name, where, out, violations);
+			checkDesc(fn.desc, cn.name, where, 0, out, violations);
+			checkSignature(fn.signature, cn.name, where, 0, out, violations);
+			checkAnnotations(fn.visibleAnnotations, cn.name, where, 0, out, violations);
+			checkAnnotations(fn.invisibleAnnotations, cn.name, where, 0, out, violations);
+			checkAnnotations(fn.visibleTypeAnnotations, cn.name, where, 0, out, violations);
+			checkAnnotations(fn.invisibleTypeAnnotations, cn.name, where, 0, out, violations);
 		}
 
 		for (MethodNode mn : cn.methods)
 		{
 			String where = mn.name + mn.desc;
-			checkDesc(mn.desc, cn.name, where, out, violations);
-			checkSignature(mn.signature, cn.name, where, out, violations);
-			checkAnnotations(mn.visibleAnnotations, cn.name, where, out, violations);
-			checkAnnotations(mn.invisibleAnnotations, cn.name, where, out, violations);
-			checkAnnotations(mn.visibleTypeAnnotations, cn.name, where, out, violations);
-			checkAnnotations(mn.invisibleTypeAnnotations, cn.name, where, out, violations);
-			checkAnnotations(mn.visibleLocalVariableAnnotations, cn.name, where, out, violations);
-			checkAnnotations(mn.invisibleLocalVariableAnnotations, cn.name, where, out, violations);
-			checkParameterAnnotations(mn.visibleParameterAnnotations, cn.name, where, out, violations);
-			checkParameterAnnotations(mn.invisibleParameterAnnotations, cn.name, where, out, violations);
-			checkAnnotationDefault(mn.annotationDefault, cn.name, where, out, violations);
+			int line = firstLineOf(mn);
+			checkDesc(mn.desc, cn.name, where, line, out, violations);
+			checkSignature(mn.signature, cn.name, where, line, out, violations);
+			checkAnnotations(mn.visibleAnnotations, cn.name, where, line, out, violations);
+			checkAnnotations(mn.invisibleAnnotations, cn.name, where, line, out, violations);
+			checkAnnotations(mn.visibleTypeAnnotations, cn.name, where, line, out, violations);
+			checkAnnotations(mn.invisibleTypeAnnotations, cn.name, where, line, out, violations);
+			checkAnnotations(mn.visibleLocalVariableAnnotations, cn.name, where, line, out, violations);
+			checkAnnotations(mn.invisibleLocalVariableAnnotations, cn.name, where, line, out, violations);
+			checkParameterAnnotations(mn.visibleParameterAnnotations, cn.name, where, line, out, violations);
+			checkParameterAnnotations(mn.invisibleParameterAnnotations, cn.name, where, line, out, violations);
+			checkAnnotationDefault(mn.annotationDefault, cn.name, where, line, out, violations);
+			if (mn.localVariables != null)
+				for (LocalVariableNode local : mn.localVariables)
+					checkSignature(local.signature, cn.name, where, line, out, violations);
 			if (mn.exceptions != null)
 				for (String ex : mn.exceptions)
-					checkClass(ex, cn.name, where, out, violations);
+					checkClass(ex, cn.name, where, line, out, violations);
 			if (mn.tryCatchBlocks != null)
 				for (TryCatchBlockNode tc : mn.tryCatchBlocks)
-					checkClass(tc.type, cn.name, where, out, violations);
+					checkClass(tc.type, cn.name, where, line, out, violations);
 			if (mn.instructions == null)
 				continue;
 			for (AbstractInsnNode insn = mn.instructions.getFirst(); insn != null; insn = insn.getNext())
-				checkInstruction(insn, cn.name, mn.name, where, out, violations);
+			{
+				if (insn instanceof LineNumberNode)
+					line = ((LineNumberNode) insn).line;
+				else
+					checkInstruction(insn, cn.name, mn.name, where, line, out, violations);
+			}
 		}
 	}
 
-	private static void checkInstruction(AbstractInsnNode insn, String from, String method, String where,
+	private static int firstLineOf(MethodNode mn)
+	{
+		if (mn.instructions == null)
+			return 0;
+		for (AbstractInsnNode insn = mn.instructions.getFirst(); insn != null; insn = insn.getNext())
+			if (insn instanceof LineNumberNode)
+				return ((LineNumberNode) insn).line;
+		return 0;
+	}
+
+	private static void checkInstruction(AbstractInsnNode insn, String from, String method, String where, int line,
 		SplitOutput out, List<Violation> violations)
 	{
 		if (insn instanceof MethodInsnNode)
 		{
 			MethodInsnNode m = (MethodInsnNode) insn;
 			checkMember(new MemberRef(m.owner, m.name, m.desc), out.removedMethods, Violation.KIND_METHOD, from, where,
-				out, violations);
+				line, out, violations);
 		}
 		else if (insn instanceof FieldInsnNode)
 		{
 			FieldInsnNode f = (FieldInsnNode) insn;
 			MemberRef ref = new MemberRef(f.owner, f.name, f.desc);
 			if (isInitializerWrite(insn.getOpcode(), method) && from.equals(f.owner) && out.removedFields.contains(ref))
-				violations.add(new Violation(from, where, ref.toString(), Violation.KIND_INITIALIZER));
+				violations.add(new Violation(from, where, ref.toString(), Violation.KIND_INITIALIZER, line));
 			else
-				checkMember(ref, out.removedFields, Violation.KIND_FIELD, from, where, out, violations);
+				checkMember(ref, out.removedFields, Violation.KIND_FIELD, from, where, line, out, violations);
 		}
 		else if (insn instanceof TypeInsnNode)
 		{
-			checkInternalOrDesc(((TypeInsnNode) insn).desc, from, where, out, violations);
+			checkInternalOrDesc(((TypeInsnNode) insn).desc, from, where, line, out, violations);
 		}
 		else if (insn instanceof MultiANewArrayInsnNode)
 		{
-			checkDesc(((MultiANewArrayInsnNode) insn).desc, from, where, out, violations);
+			checkDesc(((MultiANewArrayInsnNode) insn).desc, from, where, line, out, violations);
 		}
 		else if (insn instanceof LdcInsnNode)
 		{
-			checkConstant(((LdcInsnNode) insn).cst, from, where, out, violations);
+			checkConstant(((LdcInsnNode) insn).cst, from, where, line, out, violations);
 		}
 		else if (insn instanceof InvokeDynamicInsnNode)
 		{
 			InvokeDynamicInsnNode indy = (InvokeDynamicInsnNode) insn;
-			checkDesc(indy.desc, from, where, out, violations);
-			checkHandle(indy.bsm, from, where, out, violations);
+			checkDesc(indy.desc, from, where, line, out, violations);
+			checkHandle(indy.bsm, from, where, line, out, violations);
 			if (indy.bsmArgs != null)
 				for (Object arg : indy.bsmArgs)
-					checkConstant(arg, from, where, out, violations);
+					checkConstant(arg, from, where, line, out, violations);
 		}
 	}
 
-	private static void checkConstant(Object cst, String from, String where, SplitOutput out,
+	private static void checkConstant(Object cst, String from, String where, int line, SplitOutput out,
 		List<Violation> violations)
 	{
 		if (cst instanceof Type)
 		{
-			checkType((Type) cst, from, where, out, violations);
+			checkType((Type) cst, from, where, line, out, violations);
 		}
 		else if (cst instanceof Handle)
 		{
-			checkHandle((Handle) cst, from, where, out, violations);
+			checkHandle((Handle) cst, from, where, line, out, violations);
 		}
 		else if (cst instanceof ConstantDynamic)
 		{
 			ConstantDynamic dynamic = (ConstantDynamic) cst;
-			checkDesc(dynamic.getDescriptor(), from, where, out, violations);
-			checkHandle(dynamic.getBootstrapMethod(), from, where, out, violations);
+			checkDesc(dynamic.getDescriptor(), from, where, line, out, violations);
+			checkHandle(dynamic.getBootstrapMethod(), from, where, line, out, violations);
 			for (int i = 0; i < dynamic.getBootstrapMethodArgumentCount(); i++)
-				checkConstant(dynamic.getBootstrapMethodArgument(i), from, where, out, violations);
+				checkConstant(dynamic.getBootstrapMethodArgument(i), from, where, line, out, violations);
 		}
 	}
 
-	private static void checkHandle(Handle handle, String from, String where, SplitOutput out,
+	private static void checkHandle(Handle handle, String from, String where, int line, SplitOutput out,
 		List<Violation> violations)
 	{
 		if (handle == null)
@@ -220,19 +245,25 @@ public final class SideVerifier
 		MemberRef ref = new MemberRef(handle.getOwner(), handle.getName(), handle.getDesc());
 		boolean field = handle.getTag() >= Opcodes.H_GETFIELD && handle.getTag() <= Opcodes.H_PUTSTATIC;
 		checkMember(ref, field ? out.removedFields : out.removedMethods,
-			field ? Violation.KIND_FIELD : Violation.KIND_METHOD, from, where, out, violations);
+			field ? Violation.KIND_FIELD : Violation.KIND_METHOD, from, where, line, out, violations);
 	}
 
 	private static void checkMember(MemberRef ref, Set<MemberRef> removed, String kind, String from, String where,
-		SplitOutput out, List<Violation> violations)
+		int line, SplitOutput out, List<Violation> violations)
 	{
 		if (out.removedClasses.contains(ref.owner))
 		{
-			violations.add(new Violation(from, where, ref.owner, Violation.KIND_CLASS));
+			violations.add(new Violation(from, where, ref.owner, Violation.KIND_CLASS, line));
 			return;
 		}
-		if (removed.contains(ref))
-			violations.add(new Violation(from, where, ref.toString(), kind));
+		if (removed.contains(ref) && !lambdaBodyInDeserializeLambda(ref, where))
+			violations.add(new Violation(from, where, ref.toString(), kind, line));
+	}
+
+	private static boolean lambdaBodyInDeserializeLambda(MemberRef ref, String where)
+	{
+		return ref.name.startsWith(SideSplitter.LAMBDA_PREFIX)
+			&& where.startsWith(SideSplitter.DESERIALIZE_LAMBDA + "(");
 	}
 
 	private static boolean isInitializerWrite(int opcode, String method)
@@ -242,21 +273,21 @@ public final class SideVerifier
 	}
 
 	private static void checkAnnotations(List<? extends AnnotationNode> annotations, String from, String where,
-		SplitOutput out, List<Violation> violations)
+		int line, SplitOutput out, List<Violation> violations)
 	{
-		Annotations.forEachType(annotations, t -> checkType(t, from, where, out, violations));
+		Annotations.forEachType(annotations, t -> checkType(t, from, where, line, out, violations));
 	}
 
 	private static void checkParameterAnnotations(List<AnnotationNode>[] parameters, String from, String where,
-		SplitOutput out, List<Violation> violations)
+		int line, SplitOutput out, List<Violation> violations)
 	{
-		Annotations.forEachParameterType(parameters, t -> checkType(t, from, where, out, violations));
+		Annotations.forEachParameterType(parameters, t -> checkType(t, from, where, line, out, violations));
 	}
 
-	private static void checkAnnotationDefault(Object value, String from, String where, SplitOutput out,
+	private static void checkAnnotationDefault(Object value, String from, String where, int line, SplitOutput out,
 		List<Violation> violations)
 	{
-		Annotations.forEachValueType(value, t -> checkType(t, from, where, out, violations));
+		Annotations.forEachValueType(value, t -> checkType(t, from, where, line, out, violations));
 	}
 
 	private static void checkConstants(Map<String, ClassNode> live, SplitOutput out, List<Violation> violations)
@@ -275,32 +306,37 @@ public final class SideVerifier
 		Set<String> wanted = new HashSet<>(removed.values());
 		for (ClassNode cn : live.values())
 		{
-			Set<String> present = constantsOf(cn, wanted);
+			Map<String, Integer> present = constantsOf(cn, wanted);
 			if (present.isEmpty())
 				continue;
 			for (Map.Entry<MemberRef, String> constant : removed.entrySet())
-				if (present.contains(constant.getValue()) && sameRoot(constant.getKey().owner, cn.name))
-					violations.add(new Violation(cn.name, null, constant.getKey().toString(), Violation.KIND_INLINED));
+				if (present.containsKey(constant.getValue()) && sameRoot(constant.getKey().owner, cn.name))
+					violations.add(new Violation(cn.name, null, constant.getKey().toString(), Violation.KIND_INLINED,
+						present.get(constant.getValue())));
 		}
 	}
 
-	private static Set<String> constantsOf(ClassNode cn, Set<String> wanted)
+	private static Map<String, Integer> constantsOf(ClassNode cn, Set<String> wanted)
 	{
-		Set<String> present = new HashSet<>();
+		Map<String, Integer> present = new LinkedHashMap<>();
 		for (FieldNode fn : cn.fields)
 			if (fn.value instanceof String && wanted.contains(fn.value))
-				present.add((String) fn.value);
+				present.putIfAbsent((String) fn.value, 0);
 		for (MethodNode mn : cn.methods)
 		{
 			if (mn.instructions == null)
 				continue;
+			int line = 0;
 			for (AbstractInsnNode insn = mn.instructions.getFirst(); insn != null; insn = insn.getNext())
 			{
-				if (!(insn instanceof LdcInsnNode))
-					continue;
-				Object cst = ((LdcInsnNode) insn).cst;
-				if (cst instanceof String && wanted.contains(cst))
-					present.add((String) cst);
+				if (insn instanceof LineNumberNode)
+					line = ((LineNumberNode) insn).line;
+				else if (insn instanceof LdcInsnNode && ((LdcInsnNode) insn).cst instanceof String)
+				{
+					String value = (String) ((LdcInsnNode) insn).cst;
+					if (wanted.contains(value))
+						present.putIfAbsent(value, line);
+				}
 			}
 		}
 		return present;
@@ -309,7 +345,9 @@ public final class SideVerifier
 	private static boolean sameRoot(String owner, String candidate)
 	{
 		String root = packageRoot(owner);
-		return root.isEmpty() || candidate.startsWith(root + "/");
+		if (root.isEmpty())
+			return candidate.indexOf('/') < 0;
+		return candidate.startsWith(root + "/");
 	}
 
 	private static String packageRoot(String internalName)
@@ -321,65 +359,57 @@ public final class SideVerifier
 		return second < 0 ? internalName.substring(0, first) : internalName.substring(0, second);
 	}
 
-	private static void checkClass(String internalName, String from, String where, SplitOutput out,
+	private static void checkClass(String internalName, String from, String where, int line, SplitOutput out,
 		List<Violation> violations)
 	{
 		if (internalName != null && out.removedClasses.contains(internalName))
-			violations.add(new Violation(from, where, internalName, Violation.KIND_CLASS));
+			violations.add(new Violation(from, where, internalName, Violation.KIND_CLASS, line));
 	}
 
-	private static void checkInternalOrDesc(String value, String from, String where, SplitOutput out,
+	private static void checkInternalOrDesc(String value, String from, String where, int line, SplitOutput out,
 		List<Violation> violations)
 	{
 		if (value == null || value.isEmpty())
 			return;
 		if (value.charAt(0) == '[' || value.charAt(0) == 'L')
-			checkDesc(value, from, where, out, violations);
+			checkDesc(value, from, where, line, out, violations);
 		else
-			checkClass(value, from, where, out, violations);
+			checkClass(value, from, where, line, out, violations);
 	}
 
-	private static void checkDesc(String desc, String from, String where, SplitOutput out, List<Violation> violations)
+	private static void checkDesc(String desc, String from, String where, int line, SplitOutput out,
+		List<Violation> violations)
 	{
 		if (desc == null || desc.isEmpty())
 			return;
 		if (desc.charAt(0) == '(')
 		{
 			for (Type t : Type.getArgumentTypes(desc))
-				checkType(t, from, where, out, violations);
-			checkType(Type.getReturnType(desc), from, where, out, violations);
+				checkType(t, from, where, line, out, violations);
+			checkType(Type.getReturnType(desc), from, where, line, out, violations);
 		}
 		else
 		{
-			checkType(Type.getType(desc), from, where, out, violations);
+			checkType(Type.getType(desc), from, where, line, out, violations);
 		}
 	}
 
-	private static void checkType(Type type, String from, String where, SplitOutput out, List<Violation> violations)
+	private static void checkType(Type type, String from, String where, int line, SplitOutput out,
+		List<Violation> violations)
 	{
 		if (type == null)
 			return;
 		Type element = type.getSort() == Type.ARRAY ? type.getElementType() : type;
 		if (element.getSort() == Type.OBJECT)
-			checkClass(element.getInternalName(), from, where, out, violations);
+			checkClass(element.getInternalName(), from, where, line, out, violations);
 	}
 
-	private static void checkSignature(String signature, String from, String where, SplitOutput out,
+	private static void checkSignature(String signature, String from, String where, int line, SplitOutput out,
 		List<Violation> violations)
 	{
-		if (signature == null)
-			return;
-		int i = 0;
-		while ((i = signature.indexOf('L', i)) >= 0)
-		{
-			int end = i + 1;
-			while (end < signature.length() && ";<.".indexOf(signature.charAt(end)) < 0)
-				end++;
-			String name = signature.substring(i + 1, end);
+		for (String name : Signatures.classNames(signature))
 			if (out.removedClasses.contains(name))
-				violations.add(new Violation(from, where, name, Violation.KIND_SIGNATURE));
-			i = end;
-		}
+				violations.add(new Violation(from, where, name, Violation.KIND_SIGNATURE, line));
 	}
 
 	private static void checkAbstractContract(ClassNode cn, Resolver resolver, List<Violation> violations)

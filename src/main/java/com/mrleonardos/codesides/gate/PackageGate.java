@@ -196,174 +196,172 @@ public final class PackageGate
 		}
 	}
 
-    private final class ReferenceCollector extends ClassVisitor {
+	private final class ReferenceCollector extends ClassVisitor
+	{
+		private final String origin;
+		private final List<String> out;
 
-        private final String origin;
-        private final List<String> out;
+		ReferenceCollector(String origin, List<String> out)
+		{
+			super(Opcodes.ASM5);
+			this.origin = origin;
+			this.out = out;
+		}
 
-        ReferenceCollector(String origin, List<String> out) {
-            super(Opcodes.ASM5);
-            this.origin = origin;
-            this.out = out;
-        }
+		@Override
+		public void visit(int version, int access, String name, String signature, String superName,
+			String[] interfaces)
+		{
+			check(superName, origin, out);
+			checkText(signature, origin, out);
+			if (interfaces != null)
+				for (String type : interfaces)
+					check(type, origin, out);
+		}
 
-        @Override
-        public void visit(int version, int access, String name, String signature, String superName,
-            String[] interfaces) {
-            check(superName, origin, out);
-            checkText(signature, origin, out);
-            if (interfaces != null) {
-                for (String type : interfaces) {
-                    check(type, origin, out);
-                }
-            }
-        }
+		@Override
+		public AnnotationVisitor visitAnnotation(String desc, boolean visible)
+		{
+			checkText(desc, origin, out);
+			return super.visitAnnotation(desc, visible);
+		}
 
-        @Override
-        public AnnotationVisitor visitAnnotation(String desc, boolean visible) {
-            checkText(desc, origin, out);
-            return super.visitAnnotation(desc, visible);
-        }
+		@Override
+		public FieldVisitor visitField(int access, String name, String desc, String signature, Object value)
+		{
+			String where = origin + "#" + name;
+			checkText(desc, where, out);
+			checkText(signature, where, out);
+			return new FieldVisitor(Opcodes.ASM5)
+			{
+				@Override
+				public AnnotationVisitor visitAnnotation(String desc, boolean visible)
+				{
+					checkText(desc, where, out);
+					return super.visitAnnotation(desc, visible);
+				}
+			};
+		}
 
-        @Override
-        public FieldVisitor visitField(int access, String name, String desc, String signature, Object value) {
-            String where = origin + "#" + name;
-            checkText(desc, where, out);
-            checkText(signature, where, out);
-            return new FieldVisitor(Opcodes.ASM5) {
+		@Override
+		public MethodVisitor visitMethod(int access, String name, String desc, String signature,
+			String[] exceptions)
+		{
+			String where = origin + "#" + name + desc;
+			checkText(desc, where, out);
+			checkText(signature, where, out);
+			if (exceptions != null)
+				for (String type : exceptions)
+					check(type, where, out);
+			return new CodeCollector(where, out);
+		}
+	}
 
-                @Override
-                public AnnotationVisitor visitAnnotation(String desc, boolean visible) {
-                    checkText(desc, where, out);
-                    return super.visitAnnotation(desc, visible);
-                }
-            };
-        }
+	private final class CodeCollector extends MethodVisitor
+	{
+		private final String where;
+		private final List<String> out;
 
-        @Override
-        public MethodVisitor visitMethod(int access, String name, String desc, String signature, String[] exceptions) {
-            String where = origin + "#" + name + desc;
-            checkText(desc, where, out);
-            checkText(signature, where, out);
-            if (exceptions != null) {
-                for (String type : exceptions) {
-                    check(type, where, out);
-                }
-            }
-            return new CodeCollector(where, out);
-        }
-    }
+		CodeCollector(String where, List<String> out)
+		{
+			super(Opcodes.ASM5);
+			this.where = where;
+			this.out = out;
+		}
 
-    private final class CodeCollector extends MethodVisitor {
+		@Override
+		public void visitFieldInsn(int opcode, String owner, String name, String desc)
+		{
+			check(owner, where, out);
+			checkText(desc, where, out);
+		}
 
-        private final String where;
-        private final List<String> out;
+		@Override
+		public void visitMethodInsn(int opcode, String owner, String name, String desc, boolean isInterface)
+		{
+			check(owner, where, out);
+		}
 
-        CodeCollector(String where, List<String> out) {
-            super(Opcodes.ASM5);
-            this.where = where;
-            this.out = out;
-        }
+		@Override
+		public void visitTypeInsn(int opcode, String type)
+		{
+			check(type, where, out);
+		}
 
-        @Override
-        public void visitFieldInsn(int opcode, String owner, String name, String desc) {
-            check(owner, where, out);
-            checkText(desc, where, out);
-        }
+		@Override
+		public void visitInvokeDynamicInsn(String name, String desc, Handle bootstrap, Object... args)
+		{
+			checkText(desc, where, out);
+			check(bootstrap.getOwner(), where, out);
+			for (Object arg : args)
+				if (arg instanceof Handle)
+					check(((Handle) arg).getOwner(), where, out);
+		}
 
-        @Override
-        public void visitMethodInsn(int opcode, String owner, String name, String desc, boolean isInterface) {
-            check(owner, where, out);
-        }
+		@Override
+		public void visitMultiANewArrayInsn(String desc, int dimensions)
+		{
+			checkText(desc, where, out);
+		}
 
-        @Override
-        public void visitTypeInsn(int opcode, String type) {
-            check(type, where, out);
-        }
+		@Override
+		public void visitTryCatchBlock(Label start, Label end, Label handler, String type)
+		{
+			check(type, where, out);
+		}
 
-        @Override
-        public void visitInvokeDynamicInsn(String name, String desc, Handle bootstrap, Object... args) {
-            checkText(desc, where, out);
-            check(bootstrap.getOwner(), where, out);
-            for (Object arg : args) {
-                if (arg instanceof Handle) {
-                    check(((Handle) arg).getOwner(), where, out);
-                }
-            }
-        }
+		@Override
+		public void visitLocalVariable(String name, String desc, String signature, Label start, Label end, int index)
+		{
+			checkText(desc, where, out);
+		}
 
-        @Override
-        public void visitMultiANewArrayInsn(String desc, int dimensions) {
-            checkText(desc, where, out);
-        }
+		@Override
+		public void visitFrame(int type, int locals, Object[] local, int stackSize, Object[] stack)
+		{
+			for (Object[] group : new Object[][] { local, stack })
+			{
+				if (group == null)
+					continue;
+				for (Object item : group)
+					if (item instanceof String)
+						check((String) item, where, out);
+			}
+		}
 
-        @Override
-        public void visitTryCatchBlock(Label start, Label end, Label handler, String type) {
-            check(type, where, out);
-        }
+		@Override
+		public void visitLdcInsn(Object value)
+		{
+			if (value instanceof Type)
+				check(((Type) value).getInternalName(), where, out);
+		}
 
-        @Override
-        public void visitLocalVariable(String name, String desc, String signature, Label start, Label end, int index) {
-            checkText(desc, where, out);
-        }
+		@Override
+		public AnnotationVisitor visitAnnotation(String desc, boolean visible)
+		{
+			checkText(desc, where, out);
+			return super.visitAnnotation(desc, visible);
+		}
+	}
 
-        @Override
-        public void visitFrame(int type, int locals, Object[] local, int stackSize, Object[] stack) {
-            for (Object[] group : new Object[][] { local, stack }) {
-                if (group == null) {
-                    continue;
-                }
-                for (Object item : group) {
-                    if (item instanceof String) {
-                        check((String) item, where, out);
-                    }
-                }
-            }
-        }
-
-        @Override
-        public void visitLdcInsn(Object value) {
-            if (value instanceof Type) {
-                check(((Type) value).getInternalName(), where, out);
-            }
-        }
-
-        @Override
-        public AnnotationVisitor visitAnnotation(String desc, boolean visible) {
-            checkText(desc, where, out);
-            return super.visitAnnotation(desc, visible);
-        }
-    }
-
-    private static byte[] foreignClass() {
-        ClassWriter writer = new ClassWriter(0);
-        writer.visit(
-            Opcodes.V1_8,
-            Opcodes.ACC_PUBLIC,
-            "com/mrleonardos/codeperms/internal/ForeignReference",
-            null,
-            "java/lang/Object",
-            null);
-        writer.visitField(Opcodes.ACC_PRIVATE, "player", "Lnet/minecraft/entity/player/EntityPlayer;", null, null)
-            .visitEnd();
-        MethodVisitor body = writer.visitMethod(Opcodes.ACC_PUBLIC, "name", "()Ljava/lang/String;", null, null);
-        body.visitCode();
-        body.visitVarInsn(Opcodes.ALOAD, 0);
-        body.visitFieldInsn(
-            Opcodes.GETFIELD,
-            "com/mrleonardos/codeperms/internal/ForeignReference",
-            "player",
-            "Lnet/minecraft/entity/player/EntityPlayer;");
-        body.visitMethodInsn(
-            Opcodes.INVOKEVIRTUAL,
-            "net/minecraft/entity/player/EntityPlayer",
-            "getCommandSenderName",
-            "()Ljava/lang/String;",
-            false);
-        body.visitInsn(Opcodes.ARETURN);
-        body.visitMaxs(1, 1);
-        body.visitEnd();
-        writer.visitEnd();
-        return writer.toByteArray();
-    }
+	private static byte[] foreignClass()
+	{
+		ClassWriter writer = new ClassWriter(0);
+		writer.visit(Opcodes.V1_8, Opcodes.ACC_PUBLIC, "com/mrleonardos/codeperms/internal/ForeignReference",
+			null, "java/lang/Object", null);
+		writer.visitField(Opcodes.ACC_PRIVATE, "player", "Lnet/minecraft/entity/player/EntityPlayer;", null, null)
+			.visitEnd();
+		MethodVisitor body = writer.visitMethod(Opcodes.ACC_PUBLIC, "name", "()Ljava/lang/String;", null, null);
+		body.visitCode();
+		body.visitVarInsn(Opcodes.ALOAD, 0);
+		body.visitFieldInsn(Opcodes.GETFIELD, "com/mrleonardos/codeperms/internal/ForeignReference", "player",
+			"Lnet/minecraft/entity/player/EntityPlayer;");
+		body.visitMethodInsn(Opcodes.INVOKEVIRTUAL, "net/minecraft/entity/player/EntityPlayer", "getCommandSenderName",
+			"()Ljava/lang/String;", false);
+		body.visitInsn(Opcodes.ARETURN);
+		body.visitMaxs(1, 1);
+		body.visitEnd();
+		writer.visitEnd();
+		return writer.toByteArray();
+	}
 }

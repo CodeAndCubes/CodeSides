@@ -52,6 +52,16 @@ class ResourceRulesTest
 	}
 
 	@Test
+	void leadingDoubleStarMatchesRootFile()
+	{
+		ResourceRules rules = ResourceRules.of(Arrays.asList("**/secret.dat"), Collections.emptyList(), false);
+
+		assertEquals(Side.SERVER, rules.sideOf("secret.dat"), "**/foo ловит и файл в корне архива");
+		assertEquals(Side.SERVER, rules.sideOf("assets/mymod/secret.dat"), "**/foo ловит файл в любом каталоге");
+		assertNull(rules.sideOf("assets/mymod/secret.data"), "маска не цепляет похожие имена");
+	}
+
+	@Test
 	void specialCharactersInMasksAreLiteral()
 	{
 		ResourceRules rules = ResourceRules.of(Arrays.asList("assets/my-mod/data.json", "config/*.cfg+backup"),

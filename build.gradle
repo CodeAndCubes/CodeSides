@@ -30,9 +30,6 @@ tasks.withType(Javadoc).configureEach {
 }
 
 dependencies {
-	// ASM не ниже 9.9: 9.7 не читает классы новее Java 22 и падает IllegalArgumentException на первом
-	// же файле, собранном свежим JDK. Мод собирается восьмым байткодом, а вот библиотеки внутри jar
-	// бывают какими угодно, и проверять их всё равно нам.
 	api 'org.ow2.asm:asm:9.9'
 	api 'org.ow2.asm:asm-tree:9.9'
 
@@ -56,19 +53,15 @@ gradlePlugin {
 test {
 	useJUnitPlatform()
 
-    // Прогон тестов на другой Java: `./gradlew test -PtestJdk=8`. Байткод у мода всегда восьмой, а вот
-    // ведёт себя он на разных версиях по-разному: серверы 1.7.10 живут и на 8, и на 21 под lwjgl3ify.
-    if (project.hasProperty('testJdk')) {
-        int version = project.property('testJdk') as int
-        javaLauncher = javaToolchains.launcherFor {
-            languageVersion = JavaLanguageVersion.of(version)
-        }
-        // TestKit поднимает настоящую сборку Gradle, а девятому Gradle нужна Java 17 и новее. На
-        // восьмой такой тест проверял бы не плагин, а требования самого Gradle.
-        if (version < 17) {
-            exclude '**/SplitSidesTaskTest*'
-        }
-    }
+	if (project.hasProperty('testJdk')) {
+		int version = project.property('testJdk') as int
+		javaLauncher = javaToolchains.launcherFor {
+			languageVersion = JavaLanguageVersion.of(version)
+		}
+		if (version < 17) {
+			exclude '**/SplitSidesTaskTest*'
+		}
+	}
 	testLogging {
 		events 'passed', 'failed', 'skipped'
 	}

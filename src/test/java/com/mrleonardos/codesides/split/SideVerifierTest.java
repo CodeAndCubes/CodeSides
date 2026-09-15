@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 
@@ -24,6 +25,15 @@ class SideVerifierTest
 			"прямой вызов вырезанного класса — одно нарушение, а не по одному на инструкцию");
 		assertFalse(violations.stream().anyMatch(v -> v.from.equals(PKG + "GoodCommon")),
 			"обращение через общий интерфейс нарушением не является");
+	}
+
+	@Test
+	void violationNamesTheSourceLine()
+	{
+		List<Violation> violations = verifyClient(Fixtures.subset("Api", "ServerImpl", "BadCommon", "GoodCommon"));
+
+		assertTrue(violations.stream().anyMatch(v -> v.from.equals(PKG + "BadCommon") && v.line == 7),
+			"нарушение ссылается на строку исходника из LineNumberTable: BadCommon.java, строка 7");
 	}
 
 	@Test
@@ -124,6 +134,33 @@ class SideVerifierTest
 			&& Violation.KIND_INLINED.equals(v.kind)), "класс мода с этой строкой это по-прежнему утечка");
 		assertFalse(violations.stream().anyMatch(v -> v.from.startsWith("shaded/")),
 			"шейдженная библиотека собрана не против нашей константы: совпадение текста в ней нарушением не считается");
+	}
+
+	@Test
+	void defaultPackageOwnerMatchesOnlyDefaultPackageCandidates()
+	{
+		Map<String, byte[]> input = Fixtures.withExternal(
+			Fixtures.subset("DefaultRootLookalike"), "DefaultOwner", "DefaultUser");
+		List<Violation> violations = verifyClient(input);
+
+		assertTrue(violations.stream().anyMatch(v -> v.from.equals("DefaultUser")
+			&& Violation.KIND_INLINED.equals(v.kind) && v.target.contains("SECRET")),
+			"владелец константы в пакете по умолчанию ищет значение у кандидатов того же корня: тоже без пакета");
+		assertFalse(violations.stream().anyMatch(v -> v.from.equals(PKG + "DefaultRootLookalike")),
+			"пустой корень владельца не матчит кандидатов с любым пакетом");
+	}
+
+	@Test
+	void localVariableGenericSignatureIsVerified()
+	{
+		SplitOutput dirty = new SplitOutput(Side.CLIENT, Fixtures.subset("SignatureLocals"),
+			Collections.singleton(PKG + "SignatureLocals$Hidden"), Collections.<MemberRef>emptySet(),
+			Collections.<MemberRef>emptySet(), Collections.<MemberRef, Object>emptyMap());
+
+		assertTrue(SideVerifier.verify(dirty, ClassLookup.EMPTY).stream()
+			.anyMatch(v -> v.from.equals(PKG + "SignatureLocals") && Violation.KIND_SIGNATURE.equals(v.kind)
+				&& v.target.endsWith("Hidden")),
+			"имя вырезанного класса в generic-сигнатуре локальной переменной находится верификатором");
 	}
 
 	@Test

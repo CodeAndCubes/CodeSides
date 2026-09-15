@@ -50,6 +50,8 @@ import com.mrleonardos.codesides.Side;
  * ({@code lambda$...}), анонимные и локальные классы, методы доступа ({@code access$...}). Они не несут
  * аннотаций, поэтому вычисляются достижимостью: сгенерированный член, до которого не дотягивается ни одна
  * ссылка из оставшегося кода, удаляется. Без этого тело серверной лямбды уехало бы в клиентский jar.
+ * Тела serializable-лямбд вырезанного метода уходят по имени: единственная оставшаяся ссылка на них живёт
+ * внутри {@code $deserializeLambda$}, который всегда остаётся, и достижимость их не вычищает.
  *
  * <p>Ссылки в оставшемся коде не переписываются: реестр вырезанного отдаётся {@link SideVerifier},
  * который ловит битые ссылки на сборке, а не в рантайме у игрока.
@@ -62,7 +64,8 @@ public final class SideSplitter
 	private static final String DESC_SIDEONLY_MODERN = "Lnet/minecraftforge/fml/relauncher/SideOnly;";
 	private static final String DESC_FML_SIDE_LEGACY = "Lcpw/mods/fml/relauncher/Side;";
 	private static final String DESC_FML_SIDE_MODERN = "Lnet/minecraftforge/fml/relauncher/Side;";
-	private static final String DESERIALIZE_LAMBDA = "$deserializeLambda$";
+	static final String DESERIALIZE_LAMBDA = "$deserializeLambda$";
+	static final String LAMBDA_PREFIX = "lambda$";
 
 	private SideSplitter()
 	{
@@ -118,6 +121,7 @@ public final class SideSplitter
 		}
 
 		cascadeEnclosing(nodes, removedClasses, removedMethods);
+		cascadeLambdaBodies(nodes, removedClasses, removedMethods, removedFields);
 		sweepGenerated(nodes, removedClasses, removedMethods, removedFields);
 
 		final Map<MemberRef, Object> removedConstants = collectConstants(nodes, removedClasses, removedFields);
@@ -213,11 +217,13 @@ public final class SideSplitter
 			changed = false;
 			for (ClassNode cn : nodes.values())
 			{
-				if (cn.outerClass == null || removedClasses.contains(cn.name))
+				if (removedClasses.contains(cn.name))
 					continue;
-				boolean dead = removedClasses.contains(cn.outerClass);
+				boolean dead = cn.outerClass != null && removedClasses.contains(cn.outerClass);
 				if (!dead && cn.outerMethod != null)
 					dead = removedMethods.contains(new MemberRef(cn.outerClass, cn.outerMethod, cn.outerMethodDesc));
+				if (!dead)
+					dead = enclosedByRemoved(cn, removedClasses);
 				if (dead)
 				{
 					removedClasses.add(cn.name);
@@ -225,6 +231,59 @@ public final class SideSplitter
 				}
 			}
 		}
+	}
+
+	private static boolean enclosedByRemoved(ClassNode cn, Set<String> removedClasses)
+	{
+		if (cn.innerClasses == null)
+			return false;
+		for (InnerClassNode inner : cn.innerClasses)
+			if (cn.name.equals(inner.name) && inner.outerName != null && removedClasses.contains(inner.outerName))
+				return true;
+		return false;
+	}
+
+	private static void cascadeLambdaBodies(Map<String, ClassNode> nodes, Set<String> removedClasses,
+		Set<MemberRef> removedMethods, Set<MemberRef> removedFields)
+	{
+		for (ClassNode cn : nodes.values())
+		{
+			if (removedClasses.contains(cn.name) || isPackageInfo(cn.name))
+				continue;
+			Set<String> dead = new HashSet<>();
+			Set<String> live = new HashSet<>();
+			for (MethodNode mn : cn.methods)
+			{
+				if (removedMethods.contains(new MemberRef(cn.name, mn.name, mn.desc)))
+					dead.add(lambdaOwnerName(mn.name));
+				else
+					live.add(lambdaOwnerName(mn.name));
+			}
+			for (FieldNode fn : cn.fields)
+				if (!removedFields.contains(new MemberRef(cn.name, fn.name, fn.desc)))
+					live.add(lambdaOwnerName(fn.name));
+			dead.removeAll(live);
+			if (dead.isEmpty())
+				continue;
+			for (MethodNode mn : cn.methods)
+			{
+				if (!mn.name.startsWith(LAMBDA_PREFIX)
+					|| removedMethods.contains(new MemberRef(cn.name, mn.name, mn.desc)))
+					continue;
+				String owner = mn.name.substring(LAMBDA_PREFIX.length());
+				for (String name : dead)
+					if (owner.equals(name) || owner.startsWith(name + "$"))
+					{
+						removedMethods.add(new MemberRef(cn.name, mn.name, mn.desc));
+						break;
+					}
+			}
+		}
+	}
+
+	private static String lambdaOwnerName(String memberName)
+	{
+		return "<init>".equals(memberName) ? "new" : memberName;
 	}
 
 	private static void sweepGenerated(Map<String, ClassNode> nodes, Set<String> removedClasses,
@@ -521,8 +580,21 @@ public final class SideSplitter
 		if (mn.localVariables == null)
 			return;
 		for (Iterator<LocalVariableNode> it = mn.localVariables.iterator(); it.hasNext();)
-			if (referencesRemoved(it.next().desc, removedClasses))
+		{
+			LocalVariableNode local = it.next();
+			if (referencesRemoved(local.desc, removedClasses))
 				it.remove();
+			else if (mentionsRemoved(local.signature, removedClasses))
+				local.signature = null;
+		}
+	}
+
+	private static boolean mentionsRemoved(String signature, Set<String> removedClasses)
+	{
+		for (String name : Signatures.classNames(signature))
+			if (removedClasses.contains(name))
+				return true;
+		return false;
 	}
 
 	private static boolean referencesRemoved(String desc, Set<String> removedClasses)

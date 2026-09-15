@@ -29,6 +29,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          rm -f build/libs/*-sources.jar build/libs/*-javadoc.jar
           gh release create "${GITHUB_REF_NAME}" build/libs/*.jar \
             --repo "$GITHUB_REPOSITORY" \
             --title "${GITHUB_REF_NAME}" \

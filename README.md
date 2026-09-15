@@ -7,7 +7,7 @@
 
 Зачем: серверная логика (античит, экономика, доступы, приватные данные) не уезжает в раздачу клиента.
 
-Gradle-плагин, ядро на ASM и аннотации лежат в одном артефакте: `com.mrleonardos:codesides:1.0.0`.
+Gradle-плагин, ядро на ASM и аннотации лежат в одном артефакте: `com.mrleonardos:codesides:1.1.0`.
 
 ## Подключение
 
@@ -33,7 +33,7 @@ pluginManagement {
 
 ```groovy
 plugins {
-	id 'com.mrleonardos.codesides' version '1.0.0'
+	id 'com.mrleonardos.codesides' version '1.1.0'
 }
 
 repositories {
@@ -42,7 +42,7 @@ repositories {
 }
 
 dependencies {
-	compileOnly 'com.mrleonardos:codesides:1.0.0'
+	compileOnly 'com.mrleonardos:codesides:1.1.0'
 }
 
 codeSides {
@@ -259,7 +259,7 @@ CI-шаг «выложить `build/libs/*.jar`» не раздаст серве
 
 ```bash
 ./gradlew build                 # компиляция + 48 тестов
-./gradlew publishToMavenLocal   # публикация com.mrleonardos:codesides:1.0.0
+./gradlew publishToMavenLocal   # публикация com.mrleonardos:codesides:1.1.0
 ```
 
 JDK 21 для сборки инструмента, байткод Java 8: тот же jar годится и как gradle-плагин, и как

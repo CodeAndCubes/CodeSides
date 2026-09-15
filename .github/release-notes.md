@@ -2,8 +2,7 @@
 
 | Файл | Кому |
 |---|---|
-| `CodeSides-1.1.0.jar` | сам плагин: подключается из `mavenLocal()` после `./gradlew publishToMavenLocal` |
-| `CodeSides-1.1.0-sources.jar` | исходники для среды разработки |
+| `codesides-1.1.0.jar` | сам плагин: подключается из `mavenLocal()` после `./gradlew publishToMavenLocal` |
 
 Инструмент собирается на JDK 21 и 25, байткод восьмой. Тесты прогоняются на Java 8, 21 и 25.
 
